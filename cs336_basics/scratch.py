@@ -103,63 +103,108 @@ re.findall(PAT, "some text that i'll pre-tokenize")
 # %%
 re.findall(PAT, "Hällo! mein; name-ist wursc!tl'nt i have a big apple, and _i_ need **a** lot *of* drinks to get/ through t6his 89.")
 # %%
-from collections import Counter
-doc = """low low low low low lower lower widest widest widest newest newest newest newest newest newest"""
-pre_tokenized_corpus = doc.split(" ")
-frequency_mapping = Counter(pre_tokenized_corpus)
-processed_frequency_mapping = {}
-for word, count in frequency_mapping.items():
-    encoded_word = word.encode("utf-8") # one list of bytes
-    tokens = []
-    for b in encoded_word: # will give ints on iteration
-        token = bytes([b]) # simply using b won't work
-        tokens.append(token) # careful, it's still a list
-    processed_frequency_mapping[tuple(tokens)] = count # insert into new dict
+
 
 # %%
+from collections import Counter
 from itertools import pairwise
+import logging
 
-for i in range(6):
+logging.basicConfig(
+    level=logging.INFO,
+    force=True
+)
+
+def init_frequency_mapping(corpus):
+    pre_tokenized_corpus = corpus.split(" ")
+    frequency_mapping = Counter(pre_tokenized_corpus)
+    processed_frequency_mapping = {}
+    for word, count in frequency_mapping.items():
+        encoded_word = word.encode("utf-8") # one list of bytes
+        tokens = []
+        for b in encoded_word: # will give ints on iteration
+            token = bytes([b]) # simply using b won't work
+            tokens.append(token) # careful, it's still a list
+        processed_frequency_mapping[tuple(tokens)] = count # insert into new dict
+    logging.debug(f"Initialized frequency mapping to:\n{processed_frequency_mapping}")
+    return processed_frequency_mapping
+    
+
+doc = """low low low low low lower lower widest widest widest newest newest newest newest newest newest"""
+processed_frequency_mapping = init_frequency_mapping(doc)
+
+def count_token_pairs(frequency_mapping):
     counted_pairs = Counter()
-    for tokens, count in processed_frequency_mapping.items():
+    # Counts the occurences of pairwise tokens
+    for tokens, count in frequency_mapping.items():
         pairs = pairwise(tokens)
         naive_count = {p: count for p in pairs}
         real_count = Counter(naive_count)
         counted_pairs.update(real_count)
-    max_pair = max(counted_pairs, key=lambda token: (counted_pairs[token], token))
+    return counted_pairs
+
+
+def token_pass(tokens, max_pair):
+    new_tokens = []
+    just_matched = False
+    for token, next_token in pairwise(tokens):
+        logging.debug(f"Checking ({token}, {next_token})")
+        if (token, next_token) == max_pair:
+            logging.debug(f"Found match! {max_pair}")
+            new_tokens.append(new_token)
+            just_matched = True
+        elif just_matched:
+            just_matched = False
+            continue
+        else:
+            just_matched = False
+            new_tokens.append(token)
+
+    if not just_matched: new_tokens.append(tokens[-1])
+    return new_tokens
+
+endoftext_token = "<|endoftext|>".encode("utf-8")
+vocabulary = [endoftext_token] + [bytes([i]) for i in range(256)]
+for i in range(12):
+    counted_pairs = count_token_pairs(processed_frequency_mapping)
+    logging.debug(f"Count of pairwise tokens:\t{counted_pairs}") # count of pairwise tokens
+
+    max_pair = max(counted_pairs, key=lambda pair: (counted_pairs[pair], pair)) # gives the larger or lexicographically larger
+    logging.debug(f"Largest pair:\t{max_pair}") # largest count pair
+
     new_token = max_pair[0] + max_pair[1]
+    logging.info(f"Merging new token:\t{max_pair[0]} {max_pair[1]}")
+
+    vocabulary.append(new_token)
+    logging.debug(f"Appending {new_token} to vocabulary.")
 
     new_processed_frequency_mapping = {}
     for tokens in processed_frequency_mapping:
-        new_tokens = []
-        just_matched = False
-        for token, next_token in pairwise(tokens):
-            if (token, next_token) == max_pair:
-                new_tokens.append(new_token)
-                just_matched = True
-            elif just_matched:
-                just_matched = False
-                continue
-            else:
-                just_matched = False
-                new_tokens.append(token)       
-        new_processed_frequency_mapping[new_tokens] = processed_frequency_mapping[tokens]
-        
-    print(processed_frequency_mapping)
+        new_tokens = token_pass(tokens, max_pair)
+           
+        new_processed_frequency_mapping[tuple(new_tokens)] = processed_frequency_mapping[tokens]
+        logging.debug(f"Updated mapping at {tuple(new_tokens)} to value {processed_frequency_mapping[tokens]}.")
 
+    processed_frequency_mapping = new_processed_frequency_mapping
+    logging.info(f"New mapping: {new_processed_frequency_mapping}")
+
+logging.info(f"New vocabulary after BPE:\n{vocabulary}")
 
     
 
 # %%
-max_pair = (b'a', b'a')
+max_pair = (b'a', b'b')
 new_token = max_pair[0] + max_pair[1]
 processed_frequency_mapping = {(b'a',): 3}
 new_processed_frequency_mapping = {}
+
 for tokens in processed_frequency_mapping:
     new_tokens = []
     just_matched = False
     for token, next_token in pairwise(tokens):
+        print(f"Checking ({token}, {next_token})")
         if not just_matched and (token, next_token) == max_pair:
+            print(f"Found match! {max_pair}")
             new_tokens.append(new_token)
             just_matched = True
         elif just_matched:
@@ -171,7 +216,7 @@ for tokens in processed_frequency_mapping:
     
     if not just_matched: new_tokens.append(tokens[-1])
     new_processed_frequency_mapping[tuple(new_tokens)] = processed_frequency_mapping[tokens]
-print(new_processed_frequency_mapping)
+print(f"New mapping: {new_processed_frequency_mapping}")
 
 # %%
 for t in test:
