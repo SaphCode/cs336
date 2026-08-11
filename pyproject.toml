@@ -48,6 +48,7 @@ line-length = 120
 [dependency-groups]
 dev = [
     "ipykernel>=7.3.0",
+    "marimo>=0.23.16",
 ]
 
 [tool.ruff.lint]
