@@ -7,9 +7,6 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import importlib
-    import cs336_basics.bpe as bpe
-
-    importlib.reload(bpe)
 
     import logging
 
@@ -20,41 +17,7 @@ def _():
     )
 
     logger = logging.getLogger(__name__)
-    return bpe, logger
-
-
-@app.cell
-def _(bpe, logger):
-    doc = """low low low low low lower lower widest widest widest newest newest newest newest newest newest"""
-    processed_frequency_mapping = bpe.init_frequency_mapping(doc)
-
-    endoftext_token = "<|endoftext|>".encode("utf-8")
-    vocabulary = [endoftext_token] + [bytes([i]) for i in range(256)]
-    for i in range(12):
-        counted_pairs = bpe.count_token_pairs(processed_frequency_mapping)
-        logger.debug(f"Count of pairwise tokens:\t{counted_pairs}") # count of pairwise tokens
-
-        max_pair = max(counted_pairs, key=lambda pair: (counted_pairs[pair], pair)) # gives the larger or lexicographically larger
-        logger.debug(f"Largest pair:\t{max_pair}") # largest count pair
-
-        new_token = max_pair[0] + max_pair[1]
-        logger.info(f"Merging new token:\t{max_pair[0]} {max_pair[1]}")
-
-        vocabulary.append(new_token)
-        logger.debug(f"Appending {new_token} to vocabulary.")
-
-        new_processed_frequency_mapping = {}
-        for tokens in processed_frequency_mapping:
-            new_tokens = bpe.token_pass(tokens, max_pair, new_token)
-   
-            new_processed_frequency_mapping[tuple(new_tokens)] = processed_frequency_mapping[tokens]
-            logger.debug(f"Updated mapping at {tuple(new_tokens)} to value {processed_frequency_mapping[tokens]}.")
-
-        processed_frequency_mapping = new_processed_frequency_mapping
-        logger.info(f"New mapping: {new_processed_frequency_mapping}")
-
-    logger.info(f"New vocabulary after BPE:\t{vocabulary}")
-    return
+    return (logger,)
 
 
 @app.cell
@@ -89,8 +52,70 @@ def _():
 
 
 @app.cell
-def _(chunks, logger, special_tokens):
+def _():
+    from itertools import pairwise
+    from collections import Counter
+
+    def count_token_pairs(frequency_mapping):
+        counted_pairs = Counter()
+        # Counts the occurences of pairwise tokens
+        for tokens, c in frequency_mapping.items():
+            for pair in pairwise(tokens):
+                counted_pairs[pair] += c
+        return counted_pairs
+
+
+    def test_count_token_pairs():
+        case_1 = {
+            'hello': 10
+        }
+        expected_case_1 = Counter({('h', 'e'): 10, ('e', 'l'): 10, ('l', 'l'): 10, ('l', 'o'): 10})
+        print(expected_case_1 == count_token_pairs(case_1))
+        case_2 = {
+            'aaaa': 10
+        }
+        expected_case_2 = Counter({('a', 'a'): 30})
+        print(expected_case_2 == count_token_pairs(case_2))
+
+    test_count_token_pairs()
+
+    def token_pass(tokens, max_pair):
+        new_token = max_pair[0] + max_pair[1]
+        new_tokens = []
+        i=0
+        while i < len(tokens):
+            if (i+1 < len(tokens) and (tokens[i], tokens[i+1]) == max_pair):
+                new_tokens.append(new_token)
+                i+=2
+            else:
+                new_tokens.append(tokens[i])
+                i+=1
+
+        return new_tokens
+
+    def test_token_pass():
+        tokens_1 = (b'a', b'a', b'a', b'a', b'a')
+        max_pair_1 = (b'a', b'a')
+        new_tokens_1 = token_pass(tokens_1, max_pair_1)
+        print(new_tokens_1)
+        tokens_2 = (b'h', b'e', b'l', b'l', b'o')
+        max_pair_2 = (b'e', b'l')
+        new_tokens_2 = token_pass(tokens_2, max_pair_2)
+        print(new_tokens_2)
+
+    test_token_pass()
+
+
+    
+    return Counter, count_token_pairs, token_pass
+
+
+@app.cell
+def _(Counter, chunks, count_token_pairs, logger, special_tokens):
     import regex as re
+
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
     escaped_special_tokens = [re.escape(st) for st in special_tokens]
     split_pattern = "|".join(escaped_special_tokens)
     logger.debug(f"Using split pattern: {split_pattern} (| is regex or)")
@@ -102,12 +127,62 @@ def _(chunks, logger, special_tokens):
     split_docs = re.split(split_pattern, chunks[0])
     logger.debug(f"First 3 docs, first 20 chars:\t{split_docs[0][:20]}, {split_docs[1][:20]}, {split_docs[2][:20]}")
 
-    pretokenized_split_docs = []
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    for d in split_docs:
-        logger.debug(f"Pre-tokenizing:\t{d}")
-        pat_matches = re.findall(PAT, d)
-        logger.debug(pat_matches)
+    counts = Counter()
+    for i, d in enumerate(split_docs):
+        counts.update(m.group() for m in re.finditer(PAT, d))
+        if i > 10: break # TODO: remove
+    logger.debug(f"Counts:\t{counts}")
+
+    byte_token_counts = {}
+    for pre_token, count in counts.items():
+        encoded_pre_token = pre_token.encode("utf-8") # one list of bytes
+        byte_tokens = []
+        for b in encoded_pre_token: # will give ints on iteration
+            token = bytes([b]) # simply using b won't work
+            byte_tokens.append(token) # careful, it's still a list
+        byte_token_counts[tuple(byte_tokens)] = count # insert into new dict
+    logger.debug(f"Byte token counts:\t{byte_token_counts}")
+
+    token_pair_counts = count_token_pairs(byte_token_counts)
+    logger.debug(f"Token pair counts:\t{token_pair_counts}")
+    return byte_token_counts, token_pair_counts
+
+
+@app.cell
+def _(byte_token_counts, logger, token_pair_counts, token_pass):
+    # TODO: WEAVE IN THE PAIRING INTO THE INITIALIZATION IN THE CELL BEFORE, AND THEN SEE WHERE EVERY PAIR OCCURS AND KEEP A LIST. UPDATE THE NEW PAIRS AS SUCH:
+    # - first token count -= count
+    # - second token count -= count
+    # - new pair count += count
+    # THEN UPDATE ONLY THE OCCURENCES OF THESE WORDS BY TAKING YOUR LIST (THAT YOU DON'T HAVE YET) AND GOING EVERYWHERE THAT PAIR OCCURS
+
+    endoftext_token_bytes = "<|endoftext|>".encode("utf-8")
+    print(endoftext_token_bytes)
+    vocabulary = [] + [bytes([i]) for i in range(256)]
+
+    trained_byte_token_counts = byte_token_counts.copy()
+    for train_iteration in range(3):
+
+        max_pair = max(token_pair_counts, key=lambda pair: (token_pair_counts[pair], pair)) # gives the larger or lexicographically larger
+        logger.debug(f"Largest pair:\t{max_pair}") # largest count pair
+
+        new_token = max_pair[0] + max_pair[1]
+        logger.info(f"Merging new token:\t{max_pair[0]} {max_pair[1]}")
+
+        vocabulary.append(new_token)
+        logger.debug(f"Appending {new_token} to vocabulary.")
+
+        new_byte_token_counts = {}
+        for tokens in trained_byte_token_counts:
+            new_tokens = token_pass(tokens, max_pair)
+   
+            new_byte_token_counts[tuple(new_tokens)] = trained_byte_token_counts[tokens]
+            logger.debug(f"Updated mapping at {tuple(new_tokens)} to value {trained_byte_token_counts[tokens]}.")
+
+        trained_byte_token_counts = new_byte_token_counts
+        logger.info(f"New mapping: {new_byte_token_counts}")
+
+    logger.info(f"New vocabulary after BPE:\t{vocabulary}")
     return
 
 
