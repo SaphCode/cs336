@@ -106,13 +106,14 @@ def _():
     test_token_pass()
 
 
-    
-    return Counter, count_token_pairs, token_pass
+
+    return Counter, pairwise, token_pass
 
 
 @app.cell
-def _(Counter, chunks, count_token_pairs, logger, special_tokens):
+def _(Counter, chunks, logger, pairwise, special_tokens):
     import regex as re
+    from collections import defaultdict
 
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -133,19 +134,31 @@ def _(Counter, chunks, count_token_pairs, logger, special_tokens):
         if i > 10: break # TODO: remove
     logger.debug(f"Counts:\t{counts}")
 
-    byte_token_counts = {}
-    for pre_token, count in counts.items():
-        encoded_pre_token = pre_token.encode("utf-8") # one list of bytes
-        byte_tokens = []
-        for b in encoded_pre_token: # will give ints on iteration
-            token = bytes([b]) # simply using b won't work
-            byte_tokens.append(token) # careful, it's still a list
-        byte_token_counts[tuple(byte_tokens)] = count # insert into new dict
-    logger.debug(f"Byte token counts:\t{byte_token_counts}")
+    id_to_pre_token = {}
+    pre_token_counts = {}
+    token_pair_counts = Counter()
+    pair_to_pre_token_id = defaultdict(set)
+    for word_id, (pre_token, count) in enumerate(counts.items()):
+        # first create byte tokens from encoded pre_token
+        byte_tokens = tuple(bytes([b]) for b in pre_token.encode("utf-8"))
 
-    token_pair_counts = count_token_pairs(byte_token_counts)
+        # assign id to the byte tokens just generated
+        id_to_pre_token[word_id] = byte_tokens
+
+        # assign count to that id
+        pre_token_counts[word_id] = count
+
+        for token_pair in pairwise(byte_tokens):
+            # count pairwise tokens for bpe algorithm
+            token_pair_counts[token_pair] += count
+            # keep a lookup dict of which token pairs appear in which word
+            pair_to_pre_token_id[token_pair].add(word_id)
+        
+    logger.debug(f"ID to pre token:\t{id_to_pre_token}")
+    logger.debug(f"Pre token counts:\t{pre_token_counts}")
     logger.debug(f"Token pair counts:\t{token_pair_counts}")
-    return byte_token_counts, token_pair_counts
+    logger.debug(f"Token pair usage:\t{pair_to_pre_token_id}")
+    return (token_pair_counts,)
 
 
 @app.cell
