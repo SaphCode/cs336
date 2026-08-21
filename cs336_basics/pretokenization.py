@@ -1,6 +1,10 @@
 import os
 from typing import BinaryIO
+from collections import Counter
+import regex as re
+import logging
 
+logger = logging.getLogger(__name__)
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -48,3 +52,17 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+
+# Parallelized function
+def count_pre_tokens(chunk):
+    special_tokens = ["<|endoftext|>"]
+    escaped_special_tokens = [re.escape(st) for st in special_tokens]
+    split_pattern = "|".join(escaped_special_tokens)
+    logger.debug(f"Using split pattern: {split_pattern} (| is regex or)")
+    split_docs = re.split(split_pattern, chunk)
+    
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    counts = Counter()
+    for d in split_docs:
+        counts.update(m.group() for m in re.finditer(PAT, d))
+    return counts

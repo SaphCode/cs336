@@ -11,7 +11,7 @@ def _():
     import logging
 
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(levelname)s | %(name)s | %(message)s",
         force=True,
     )
@@ -41,14 +41,12 @@ def _(logger):
             chunks.append(chunk)
             logger.debug(f"Chunked text, first and last 100 chars:\n{chunk[:100]}\n...\n{chunk[-100:]}")
             # Run pre-tokenization on your chunk and store the counts for each pre-token
-    return (chunks,)
+    return chunks, num_processes
 
 
 @app.cell
 def _():
-    special_tokens = ["<|endoftext|>", "<|testtoken|>"]
-    "|".join(special_tokens)
-    return (special_tokens,)
+    return
 
 
 @app.cell
@@ -108,26 +106,23 @@ def _():
 
 
 @app.cell
-def _(Counter, chunks, logger, pairwise, special_tokens):
-    import regex as re
+def _(Counter, chunks, logger, num_processes, pairwise):
     from collections import defaultdict
+    import regex as re
 
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    from concurrent.futures import ProcessPoolExecutor
 
-    escaped_special_tokens = [re.escape(st) for st in special_tokens]
-    split_pattern = "|".join(escaped_special_tokens)
-    logger.debug(f"Using split pattern: {split_pattern} (| is regex or)")
+    from cs336_basics.pretokenization import count_pre_tokens
 
-    matches = re.findall(split_pattern, chunks[0])
-    logger.debug(f"First 5 matches:\t{matches[:5]}")
-    logger.debug(f"Last 5 matches:\t{matches[-5:]}")
-
-    split_docs = re.split(split_pattern, chunks[0])
-    logger.debug(f"First 3 docs, first 20 chars:\t{split_docs[0][:20]}, {split_docs[1][:20]}, {split_docs[2][:20]}")
+    with ProcessPoolExecutor(max_workers=num_processes) as executor:
+        chunk_counters = executor.map(
+            count_pre_tokens,
+            chunks
+        )
 
     counts = Counter()
-    for i, d in enumerate(split_docs):
-        counts.update(m.group() for m in re.finditer(PAT, d))
+    for chunk_counts in chunk_counters:
+        counts.update(chunk_counts)
 
     logger.debug(f"Counts:\t{counts}")
 
@@ -259,7 +254,7 @@ def _(
         #             f"Missing usage mapping: {pair} occurs in "
         #             f"{pt_id} -> {tokens}"
         #         )
-        
+    
     logger.info(f"New vocabulary:\t{vocabulary}")
     return
 
